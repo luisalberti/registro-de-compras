@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- El Excel se escribe en la cache y se comparte desde ahi. No necesita
+         sobrevivir a que el usuario limpie la app: ya se lo llevo al
+         compartirlo. -->
+    <cache-path name="exportes" path="." />
+</paths>

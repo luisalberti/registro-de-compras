@@ -1,0 +1,12 @@
+*.iml
+.gradle/
+local.properties
+.idea/
+build/
+*.apk
+# La carpeta llave/ SI va al repositorio: es la llave de depuracion fija que
+# hace que todos los builds queden firmados igual. Sin ella vuelve el
+# "paquete no valido" al instalar una version sobre otra.
+*.jks
+*.keystore
+!llave/depuracion.p12

@@ -1,0 +1,74 @@
+name: APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  construir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Compilar debug
+        run: ./gradlew assembleDebug --no-daemon
+
+      # La firma se revisa en el build, no en el celular. Es la MISMA llave que
+      # la app de inventario, asi que la huella es la misma.
+      - name: Comprobar la firma
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          FIRMANTE=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          HUELLA=$("$FIRMANTE" verify --print-certs "$APK" \
+                   | grep -i "SHA-256 digest" | head -1 | tr -d " " | cut -d: -f2-)
+          ESPERADA="CC2C182D45F9467229BAF11E78CB519059766A5C29AC4263970D480D6A6F5144"
+          echo "huella del APK: $HUELLA"
+          if [ "${HUELLA^^}" != "$ESPERADA" ]; then
+            echo "::error::La firma cambio. Revisa que llave/depuracion.p12 haya"
+            echo "::error::subido al repo. Si la huella de arriba se ve bien y es"
+            echo "::error::el primer build, copiala a ESPERADA en este archivo."
+            exit 1
+          fi
+          echo "Firma correcta."
+
+      - name: Renombrar
+        run: |
+          mkdir -p entrega
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             "entrega/boletas-${{ github.run_number }}.apk"
+          ls -lh entrega/
+
+      # El Release entrega el .apk directo. El artifact de Actions siempre baja
+      # envuelto en .zip y Android no instala un zip.
+      - name: Publicar el APK como Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: APK build ${{ github.run_number }}
+          body: |
+            Compilado desde `${{ github.sha }}`.
+
+            Bájalo desde **Assets**, aquí abajo. Es el `.apk` directo: se
+            instala tocándolo. Necesitas Android 12 o más nuevo.
+          files: entrega/*.apk
+          prerelease: true
+
+      - name: Guardar el APK como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: boletas-debug
+          path: entrega/*.apk
+          if-no-files-found: error
