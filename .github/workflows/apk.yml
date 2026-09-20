@@ -35,7 +35,7 @@ jobs:
           APK=app/build/outputs/apk/debug/app-debug.apk
           FIRMANTE=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
           HUELLA=$("$FIRMANTE" verify --print-certs "$APK" \
-                   | grep -i "SHA-256 digest" | head -1 | tr -d " " | cut -d: -f2-)
+                   | grep -i "SHA-256 digest" | head -1 | grep -oiE '[0-9a-f]{64}')
           ESPERADA="CC2C182D45F9467229BAF11E78CB519059766A5C29AC4263970D480D6A6F5144"
           echo "huella del APK: $HUELLA"
           if [ "${HUELLA^^}" != "$ESPERADA" ]; then
