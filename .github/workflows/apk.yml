@@ -23,8 +23,10 @@ jobs:
       - name: Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Compilar debug
-        run: ./gradlew assembleDebug --no-daemon
+          - name: Compilar debug
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
 
       # La firma se revisa en el build, no en el celular. Es la MISMA llave que
       # la app de inventario, asi que la huella es la misma.
