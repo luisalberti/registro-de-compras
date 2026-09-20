@@ -2,7 +2,7 @@ package cl.efficientchile.boletas.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
+import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -25,6 +25,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import cl.efficientchile.boletas.util.Fotos
 import cl.efficientchile.boletas.util.LectorBoleta
+import cl.efficientchile.boletas.util.Ocr
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -143,16 +144,18 @@ fun EscanearScreen(
                                 override fun onImageSaved(o: ImageCapture.OutputFileResults) {
                                     scope.launch {
                                         try {
-                                            val texto = withContext(Dispatchers.IO) {
-                                                val chico = File(ctx.cacheDir,
-                                                    "c_${System.currentTimeMillis()}.jpg")
-                                                Fotos.comprimir(crudo, chico)
-                                                crudo.delete()
-                                                val t = reconocer(chico)
-                                                chico.delete()   // la foto no se guarda
-                                                t
+                                            val lineas = withContext(Dispatchers.IO) {
+                                                // Se lee a buena resolucion y sin
+                                                // recomprimir: ver Fotos.paraOcr.
+                                                val bmp = Fotos.paraOcr(crudo)
+                                                crudo.delete()   // la foto no se guarda
+                                                val t = reconocer(bmp)
+                                                bmp.recycle()
+                                                // Lineas rehechas por posicion, no
+                                                // el texto plano de ML Kit.
+                                                Ocr.lineas(t)
                                             }
-                                            onLeido(LectorBoleta.leer(texto))
+                                            onLeido(LectorBoleta.leer(lineas))
                                         } catch (e: Exception) {
                                             error = e.message ?: "No se pudo leer la foto"
                                         } finally {
@@ -174,13 +177,18 @@ fun EscanearScreen(
     }
 }
 
-private suspend fun reconocer(foto: File): String {
-    val bmp = BitmapFactory.decodeFile(foto.absolutePath)
-        ?: throw IllegalStateException("No se pudo abrir la foto")
+/**
+ * Devuelve el resultado COMPLETO de ML Kit, con los rectangulos de cada
+ * linea, y no `.text`. Ese texto plano concatena los bloques en el orden en
+ * que ML Kit los armo, que en un documento de dos columnas entrega la columna
+ * de etiquetas separada de la de montos. Las coordenadas son las que permiten
+ * volver a armar el papel: ver Ocr.lineas.
+ */
+private suspend fun reconocer(bmp: Bitmap): com.google.mlkit.vision.text.Text {
     val lector = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     return suspendCancellableCoroutine { cont ->
         lector.process(InputImage.fromBitmap(bmp, 0))
-            .addOnSuccessListener { cont.resumeWith(Result.success(it.text)) }
+            .addOnSuccessListener { cont.resumeWith(Result.success(it)) }
             .addOnFailureListener { cont.resumeWith(Result.failure(it)) }
     }
 }

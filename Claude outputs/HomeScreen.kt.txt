@@ -6,7 +6,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,13 +27,8 @@ fun HomeScreen(
     onEscanear: () -> Unit,
     onExportar: () -> Unit,
     onGastos: () -> Unit,
-    onAjustes: () -> Unit,
     onBorrar: (Documento) -> Unit,
     exportando: Boolean,
-    /** Cuantas faltan por subir. -1 = no hay planilla configurada. */
-    pendientes: Int,
-    subiendo: Boolean,
-    avisoNube: String?,
 ) {
     val sumaTotal = docs.sumOf { it.total ?: 0 }
 
@@ -47,9 +41,6 @@ fun HomeScreen(
                 actions = {
                     if (docs.isNotEmpty()) {
                         TextButton(onClick = onGastos) { Text("Mis gastos", color = Blanco) }
-                    }
-                    IconButton(onClick = onAjustes) {
-                        Icon(Icons.Default.Settings, "Planilla en la nube", tint = Blanco)
                     }
                 },
             )
@@ -72,26 +63,17 @@ fun HomeScreen(
                     shadowElevation = 8.dp, color = Blanco,
                     modifier = Modifier.navigationBarsPadding(),
                 ) {
-                  Column {
-                    Text(
-                        "Se arma el Excel y eliges a dónde: correo, WhatsApp, Drive.",
-                        style = MaterialTheme.typography.bodySmall, color = TintaSuave,
-                        modifier = Modifier.fillMaxWidth()
-                            .padding(start = 16.dp, end = 16.dp, top = 12.dp))
                     Button(
                         onClick = onExportar,
                         enabled = !exportando,
                         colors = ButtonDefaults.buttonColors(containerColor = CyanProfundo),
-                        modifier = Modifier.fillMaxWidth()
-                            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp)
-                            .height(52.dp),
+                        modifier = Modifier.fillMaxWidth().padding(16.dp).height(52.dp),
                     ) {
                         if (exportando) CircularProgressIndicator(
                             Modifier.size(20.dp), strokeWidth = 2.dp, color = Blanco)
-                        else Text("Compartir Excel (${docs.size})",
+                        else Text("Exportar Excel (${docs.size})",
                             style = MaterialTheme.typography.labelLarge)
                     }
-                  }
                 }
             }
         },
@@ -127,37 +109,6 @@ fun HomeScreen(
                     }
                     Text(clp(sumaTotal), style = MaterialTheme.typography.headlineMedium,
                         color = Marino)
-                }
-            }
-
-            /* El estado de la sincronizacion se muestra siempre que haya
-               planilla, incluso cuando va todo bien. Un respaldo silencioso
-               es un respaldo en el que nadie confia: la unica forma de saber
-               que funciona es verlo decir que funciona. */
-            if (pendientes >= 0) {
-                val texto = when {
-                    avisoNube != null -> avisoNube
-                    subiendo -> "Subiendo a la planilla…"
-                    pendientes == 0 -> "Todo subido a tu planilla."
-                    pendientes == 1 -> "1 documento espera señal para subir."
-                    else -> "$pendientes documentos esperan señal para subir."
-                }
-                val malo = avisoNube != null
-                Surface(
-                    onClick = onAjustes,
-                    color = if (malo) MaterialTheme.colorScheme.errorContainer else Nieve,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        if (subiendo) CircularProgressIndicator(
-                            Modifier.size(14.dp), strokeWidth = 2.dp, color = CyanProfundo)
-                        Text(texto, style = MaterialTheme.typography.bodySmall,
-                            color = if (malo) MaterialTheme.colorScheme.error else TintaSuave)
-                    }
                 }
             }
 

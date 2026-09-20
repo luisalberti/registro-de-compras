@@ -1,0 +1,188 @@
+/**
+ * ============================================================
+ *  Planilla de gastos - recibe las boletas desde el telefono
+ * ============================================================
+ *
+ * Pega esto en Extensiones > Apps Script de tu planilla, guarda,
+ * y publicalo como aplicacion web con acceso "Cualquier persona".
+ *
+ * Crea solo tres hojas:
+ *   Documentos - una fila por boleta
+ *   Detalle    - una fila por producto
+ *   Resumen    - totales por dia, por mes y por ano
+ *
+ * No borra nada ni toca otras hojas que tengas.
+ */
+
+var HOJA_DOC = 'Documentos';
+var HOJA_DET = 'Detalle';
+var HOJA_RES = 'Resumen';
+
+var COL_DOC = ['ID', 'Fecha', 'Mes', 'Ano', 'Tipo', 'N Documento', 'RUT emisor',
+               'Neto', 'IVA', 'Total', 'Tarjeta', 'Forma pago', 'Avisos',
+               'Recibido'];
+var COL_DET = ['ID', 'Fecha', 'N Documento', 'Descripcion', 'Cantidad',
+               'Valor unitario', 'Valor total'];
+
+function doPost(e) {
+  // El candado evita que dos envios seguidos escriban en la misma fila.
+  var candado = LockService.getScriptLock();
+  try {
+    candado.waitLock(20000);
+  } catch (err) {
+    return responder({ ok: false, error: 'ocupado' });
+  }
+  try {
+    var datos = JSON.parse(e.postData.contents);
+
+    if (datos.prueba) {
+      preparar();
+      return responder({ ok: true, mensaje: 'conexion correcta' });
+    }
+
+    var libro = preparar();
+    var hojaDoc = libro.getSheetByName(HOJA_DOC);
+
+    // Si ese ID ya esta, no se escribe de nuevo. Es lo que permite que el
+    // telefono reintente sin miedo: reenviar cien veces deja una sola fila.
+    if (existe(hojaDoc, datos.id)) {
+      return responder({ ok: true, mensaje: 'ya estaba' });
+    }
+
+    var fecha = datos.fecha || '';
+    var mes = fecha.length >= 7 ? fecha.substring(0, 7) : '';
+    var ano = fecha.length >= 4 ? fecha.substring(0, 4) : '';
+
+    hojaDoc.appendRow([
+      String(datos.id),
+      fecha,
+      mes,
+      ano,
+      datos.tipo || '',
+      datos.numero || '',
+      datos.rut || '',
+      numero(datos.neto),
+      numero(datos.iva),
+      numero(datos.total),
+      datos.tarjeta || '',
+      datos.formaPago || '',
+      datos.avisos || '',
+      new Date(),
+    ]);
+
+    var items = datos.items || [];
+    if (items.length > 0) {
+      var hojaDet = libro.getSheetByName(HOJA_DET);
+      var filas = [];
+      for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        filas.push([
+          String(datos.id),
+          fecha,
+          datos.numero || '',
+          it.descripcion || '',
+          numero(it.cantidad),
+          numero(it.valorUnitario),
+          numero(it.valorTotal),
+        ]);
+      }
+      hojaDet.getRange(hojaDet.getLastRow() + 1, 1, filas.length, COL_DET.length)
+             .setValues(filas);
+    }
+
+    return responder({ ok: true, mensaje: 'guardado' });
+  } catch (err) {
+    return responder({ ok: false, error: String(err) });
+  } finally {
+    candado.releaseLock();
+  }
+}
+
+/** Abrir la direccion en el navegador tiene que decir algo util. */
+function doGet() {
+  return responder({ ok: true, mensaje: 'La planilla esta escuchando.' });
+}
+
+function responder(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/** '' y null quedan como celda vacia; lo demas como numero de verdad. */
+function numero(v) {
+  if (v === null || v === undefined || v === '') return '';
+  var n = Number(v);
+  return isNaN(n) ? '' : n;
+}
+
+function existe(hoja, id) {
+  var ultima = hoja.getLastRow();
+  if (ultima < 2) return false;
+  var columna = hoja.getRange(2, 1, ultima - 1, 1).getValues();
+  var buscado = String(id);
+  for (var i = 0; i < columna.length; i++) {
+    if (String(columna[i][0]) === buscado) return true;
+  }
+  return false;
+}
+
+/** Crea las hojas que falten. Si ya existen, no las toca. */
+function preparar() {
+  var libro = SpreadsheetApp.getActiveSpreadsheet();
+  crearHoja(libro, HOJA_DOC, COL_DOC);
+  crearHoja(libro, HOJA_DET, COL_DET);
+  crearResumen(libro);
+  return libro;
+}
+
+function crearHoja(libro, nombre, columnas) {
+  var hoja = libro.getSheetByName(nombre);
+  if (!hoja) {
+    hoja = libro.insertSheet(nombre);
+  }
+  if (hoja.getLastRow() === 0) {
+    hoja.getRange(1, 1, 1, columnas.length).setValues([columnas]).setFontWeight('bold');
+    hoja.setFrozenRows(1);
+  }
+  return hoja;
+}
+
+/**
+ * El Resumen son formulas, no datos copiados.
+ *
+ * Asi se recalcula solo cada vez que llega una boleta nueva. Si fueran
+ * valores escritos por el script, habria que reescribirlos en cada envio y
+ * cualquier envio fallido dejaria el resumen mintiendo.
+ */
+function crearResumen(libro) {
+  var hoja = libro.getSheetByName(HOJA_RES);
+  if (hoja) return hoja;
+  hoja = libro.insertSheet(HOJA_RES);
+
+  hoja.getRange('A1').setValue('Por dia').setFontWeight('bold');
+  hoja.getRange('A2').setFormula(
+    "=IFERROR(QUERY(Documentos!A:J, \"select B, count(A), sum(J) " +
+    "where B is not null and B <> 'Fecha' group by B order by B desc " +
+    "label count(A) 'Documentos', sum(J) 'Total'\", 1), \"\")");
+
+  hoja.getRange('E1').setValue('Por mes').setFontWeight('bold');
+  hoja.getRange('E2').setFormula(
+    "=IFERROR(QUERY(Documentos!A:J, \"select C, count(A), sum(J) " +
+    "where C is not null and C <> 'Mes' group by C order by C desc " +
+    "label count(A) 'Documentos', sum(J) 'Total'\", 1), \"\")");
+
+  hoja.getRange('I1').setValue('Por ano').setFontWeight('bold');
+  hoja.getRange('I2').setFormula(
+    "=IFERROR(QUERY(Documentos!A:J, \"select D, count(A), sum(J) " +
+    "where D is not null and D <> 'Ano' group by D order by D desc " +
+    "label count(A) 'Documentos', sum(J) 'Total'\", 1), \"\")");
+
+  hoja.getRange('M1').setValue('Lo que mas gastas').setFontWeight('bold');
+  hoja.getRange('M2').setFormula(
+    "=IFERROR(QUERY(Detalle!A:G, \"select D, sum(G) " +
+    "where D is not null and D <> 'Descripcion' group by D " +
+    "order by sum(G) desc limit 25 label sum(G) 'Total'\", 1), \"\")");
+
+  return hoja;
+}

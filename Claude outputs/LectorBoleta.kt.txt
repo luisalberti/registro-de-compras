@@ -143,10 +143,11 @@ object LectorBoleta {
         .replace('á', 'A').replace('é', 'E').replace('í', 'I')
         .replace('ó', 'O').replace('ú', 'U').replace('ñ', 'N')
 
-    private fun normalizar(lineas: List<String>): List<String> =
-        lineas
+    private fun normalizar(texto: String): List<String> =
+        texto.lineSequence()
             .map { sinTildes(it).uppercase().replace(RE_ESPACIOS, " ").trim() }
             .filter { it.isNotEmpty() }
+            .toList()
 
     /** "1.030,29" -> 1030.29 ; "6.303" -> 6303.0 ; "590" -> 590.0 */
     private fun cifra(s: String): Double? {
@@ -306,17 +307,8 @@ object LectorBoleta {
         return items
     }
 
-    /**
-     * Entrada preferida: las lineas ya rehechas por posicion (ver Ocr.lineas).
-     *
-     * Existe esta forma —y no solo la de texto plano— porque la posicion de
-     * cada palabra es informacion que el papel si tiene y que el texto plano
-     * bota. En un documento de dos columnas, "TOTAL AFECTO" y su monto pueden
-     * terminar a diez lineas de distancia si se confia en el orden de bloques
-     * de ML Kit.
-     */
-    fun leer(lineas: List<String>): Lectura {
-        val L = normalizar(lineas)
+    fun leer(texto: String): Lectura {
+        val L = normalizar(texto)
         val avisos = mutableListOf<String>()
         val inicio = inicioBloqueTotales(L)
         val B = (inicio until L.size).toList()
@@ -435,9 +427,6 @@ object LectorBoleta {
 
         return Lectura(total, neto, iva, numero, fecha, hora, rut, u4, items, avisos)
     }
-
-    /** Forma antigua, por si llega texto plano. Prefiere la de lineas. */
-    fun leer(texto: String): Lectura = leer(texto.lineSequence().toList())
 
     /** Primer monto del bloque cuya linea lleve la etiqueta. */
     private fun enBloque(L: List<String>, B: List<Int>, patron: String): Int? {

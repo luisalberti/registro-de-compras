@@ -32,6 +32,8 @@ data class Documento(
     val formaPago: String,    // efectivo | tarjeta | transferencia | ""
     val avisos: String,
     val items: List<LectorBoleta.Item> = emptyList(),
+    /** Si ya quedo escrito en la planilla. Lo que no subio se reintenta. */
+    val subido: Boolean = false,
 ) {
     fun aJson(): JSONObject = JSONObject().apply {
         put("id", id); put("fecha", fecha); put("tipo", tipo)
@@ -50,6 +52,7 @@ data class Documento(
             })
         }
         put("items", arr)
+        put("subido", subido)
     }
 
     companion object {
@@ -82,6 +85,7 @@ data class Documento(
             formaPago = o.optString("formaPago"),
             avisos = o.optString("avisos"),
             items = itemsDeJson(o),
+            subido = o.optBoolean("subido", false),
         )
 
         fun listaDeJson(txt: String): List<Documento> {

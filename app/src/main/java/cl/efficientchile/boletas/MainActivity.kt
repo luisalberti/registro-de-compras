@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.fillMaxSize
 import cl.efficientchile.boletas.data.Documento
 import cl.efficientchile.boletas.export.Excel
+import cl.efficientchile.boletas.ui.AjustesScreen
 import cl.efficientchile.boletas.ui.EscanearScreen
 import cl.efficientchile.boletas.ui.GastosScreen
 import cl.efficientchile.boletas.ui.HomeScreen
@@ -18,6 +19,7 @@ import cl.efficientchile.boletas.ui.RevisarScreen
 import cl.efficientchile.boletas.ui.TemaInventario
 import cl.efficientchile.boletas.util.Compartir
 import cl.efficientchile.boletas.util.LectorBoleta
+import cl.efficientchile.boletas.util.Nube
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -30,6 +32,7 @@ private sealed class Pantalla {
     data object Inicio : Pantalla()
     data object Escanear : Pantalla()
     data object Gastos : Pantalla()
+    data object Ajustes : Pantalla()
     data class Revisar(val lectura: LectorBoleta.Lectura) : Pantalla()
 }
 
@@ -75,8 +78,51 @@ private fun AppRoot() {
     val docs = remember { mutableStateListOf<Documento>().apply { addAll(almacen.cargar()) } }
     var pantalla by remember { mutableStateOf<Pantalla>(Pantalla.Inicio) }
     var exportando by remember { mutableStateOf(false) }
+    var subiendo by remember { mutableStateOf(false) }
+    var avisoNube by remember { mutableStateOf<String?>(null) }
 
     fun persistir() = almacen.guardar(docs.toList())
+
+    /**
+     * Manda a la planilla todo lo que todavia no subio.
+     *
+     * Se llama al guardar una boleta y tambien al abrir la app. Ese segundo
+     * caso es el que importa: si escaneaste en la calle sin señal, la boleta
+     * quedo pendiente, y lo unico que la subiria es que alguien lo reintente
+     * despues. Pedirle al usuario que se acuerde de apretar un boton es
+     * pedirle que haga el trabajo del programa.
+     */
+    suspend fun sincronizar() {
+        if (!ctx.ajustes.haySincronizacion) return
+        val url = ctx.ajustes.urlPlanilla
+        val pendientes = docs.filter { !it.subido }
+        if (pendientes.isEmpty()) return
+        subiendo = true
+        try {
+            for (d in pendientes) {
+                val r = withContext(Dispatchers.IO) { Nube.enviar(url, d) }
+                if (r.ok) {
+                    val i = docs.indexOfFirst { it.id == d.id }
+                    if (i >= 0) docs[i] = docs[i].copy(subido = true)
+                    persistir()
+                } else if (r.reintentable) {
+                    // Sin señal: no tiene sentido insistir con las que siguen.
+                    break
+                } else {
+                    // Algo esta mal configurado; insistir solo gasta bateria.
+                    avisoNube = r.mensaje
+                    break
+                }
+            }
+        } finally {
+            subiendo = false
+        }
+    }
+
+    // Al abrir la app se reintenta lo que quedo pendiente de la calle. Va
+    // DESPUES de declarar sincronizar(): en Kotlin una funcion local no
+    // existe antes de su declaracion.
+    LaunchedEffect(Unit) { sincronizar() }
 
     when (val p = pantalla) {
         is Pantalla.Inicio -> HomeScreen(
@@ -84,6 +130,10 @@ private fun AppRoot() {
             exportando = exportando,
             onEscanear = { pantalla = Pantalla.Escanear },
             onGastos = { pantalla = Pantalla.Gastos },
+            onAjustes = { pantalla = Pantalla.Ajustes },
+            pendientes = if (ctx.ajustes.haySincronizacion) docs.count { !it.subido } else -1,
+            subiendo = subiendo,
+            avisoNube = avisoNube,
             onBorrar = { d -> docs.remove(d); persistir() },
             onExportar = {
                 exportando = true
@@ -104,6 +154,16 @@ private fun AppRoot() {
             },
         )
 
+        is Pantalla.Ajustes -> AjustesScreen(
+            urlActual = ctx.ajustes.urlPlanilla,
+            onGuardar = { u ->
+                ctx.ajustes.urlPlanilla = u
+                avisoNube = null
+                scope.launch { sincronizar() }
+            },
+            onVolver = { pantalla = Pantalla.Inicio },
+        )
+
         is Pantalla.Gastos -> GastosScreen(
             docs = docs,
             onVolver = { pantalla = Pantalla.Inicio },
@@ -119,6 +179,7 @@ private fun AppRoot() {
             onGuardar = { doc ->
                 docs.add(0, doc)     // el mas nuevo arriba
                 persistir()
+                scope.launch { sincronizar() }
                 // Vuelve directo a la camara: registrar una pila es escanear
                 // una tras otra, no volver al inicio entre cada una.
                 pantalla = Pantalla.Escanear

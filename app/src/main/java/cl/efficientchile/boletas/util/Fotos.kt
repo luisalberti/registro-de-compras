@@ -41,6 +41,39 @@ object Fotos {
         return destino
     }
 
+    /**
+     * La foto para LEER, no para enviar.
+     *
+     * Esto es lo contrario de `comprimir()`, y la diferencia importa. Aquella
+     * achica a 1.600 px porque la foto se sube por 4G. Aca la foto nunca sale
+     * del telefono: se le extrae el texto y se borra. Achicarla no ahorra nada
+     * y arruina justo lo que se necesita — una boleta de 60 lineas a 1.600 px
+     * de alto deja cada linea en unos 15 px, y la letra chica del detalle se
+     * vuelve ilegible. Ese era el motivo real de que el lector encontrara los
+     * totales (impresos grandes) y se perdiera los productos.
+     *
+     * 3.000 px es el compromiso: conserva la letra chica y mantiene el mapa de
+     * bits bajo control. A resolucion completa, una camara de 12 MP pide unos
+     * 48 MB de una sola vez y en un telefono modesto eso es quedarse sin
+     * memoria justo cuando el vendedor esta registrando.
+     *
+     * No se recomprime a JPEG: cada recompresion ensucia los bordes de las
+     * letras, que es exactamente donde el reconocimiento se juega la partida.
+     */
+    fun paraOcr(origen: File, maxLado: Int = 3000): Bitmap {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(origen.absolutePath, bounds)
+
+        var sample = 1
+        val mayor = max(bounds.outWidth, bounds.outHeight)
+        while (mayor / (sample * 2) >= maxLado) sample *= 2
+
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        val bmp = BitmapFactory.decodeFile(origen.absolutePath, opts)
+            ?: throw IllegalStateException("No se pudo abrir la foto")
+        return rotarSegunExif(origen, bmp)
+    }
+
     /** Decodifica para mostrar en pantalla, sin cargar la imagen completa. */
     fun decodificar(archivo: File, maxLado: Int = 1400): Bitmap? {
         if (!archivo.isFile) return null
