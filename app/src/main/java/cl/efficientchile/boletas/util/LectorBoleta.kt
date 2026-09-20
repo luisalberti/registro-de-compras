@@ -106,6 +106,26 @@ object LectorBoleta {
     private val RE_ITEM_A = Regex("""^(\d{1,4})\s*[Xx]\s*($CIFRA)\s+(.+?)\$?\s*($CIFRA)\s*$""")
     private val RE_ITEM_C = Regex("""^(\d{1,4})\s+(.+?)\s+\$?($CIFRA)\s+\$?($CIFRA)\s+\$?($CIFRA)\s*$""")
     private val RE_ITEM_B = Regex("""^(\d{8,14})\s+(.+?)\$?\s*($CIFRA)\s*$""")
+
+    /* Las dos formas mas comunes, y las que mas costo ver: muchas boletas
+       imprimen el detalle SIN cantidad, arriba del bloque de totales, en dos
+       o tres columnas.
+
+         tres columnas:  7801  CAJA ESTANCA 200X100   3.269
+         dos columnas:   PAN HALLULLA KG              1.590
+
+       Son patrones sueltos a proposito, porque el formato es pobre. Lo que
+       impide que se traguen media boleta no es la expresion sino esProducto,
+       que exige letras de verdad, descarta cabeceras, fechas, RUT y cualquier
+       linea con dos puntos, y rechaza los numeros que no pueden ser un precio.
+       Sin esa guarda, un voucher de tarjeta (que no tiene detalle) saldria
+       lleno de productos inventados. */
+    private val RE_ITEM_E = Regex(
+        """^([A-Z0-9][A-Z0-9\-./]{2,17})\s+([A-Z].*?)\s+\$?($CIFRA)\s*$""")
+    private val RE_ITEM_F = Regex("""^([A-Z].*?)\s+\$?($CIFRA)\s*$""")
+
+    private val RE_LETRA = Regex("""[A-Z]""")
+    private val RE_FECHA_U_HORA = Regex("""\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}:\d{2}""")
     private val RE_COD_BARRAS = Regex("""^\s*\d{8,14}\s*""")
     private val RE_DESDE_PESO = Regex("""\$.*$""")
     private val RE_ESPACIOS = Regex("""\s+""")
@@ -174,6 +194,30 @@ object LectorBoleta {
             .replace(RE_ESPACIOS, " ")
             .trim(' ', '.', ':', '-', '$')
 
+    /**
+     * El filtro que hace utilizables a los patrones sueltos.
+     *
+     * Sin esto, "nombre + precio" se traga la direccion, el telefono y el
+     * numero de boleta. La regla es al reves de lo que parece: no se trata de
+     * reconocer un producto (no hay forma) sino de descartar todo lo que
+     * seguro NO lo es.
+     */
+    private fun esProducto(desc: String, precioTexto: String, precio: Double): Boolean {
+        if (RE_CABECERA.containsMatchIn(desc)) return false
+        if (RE_PLATA.containsMatchIn(desc)) return false
+        if (RE_FECHA_U_HORA.containsMatchIn(desc)) return false
+        if (RE_RUT_EN_LINEA.containsMatchIn(desc)) return false
+        // Dos puntos es la marca de una etiqueta: "Caja: 0004", "Fono: 332...".
+        if (desc.contains(':')) return false
+        // Un nombre de producto tiene letras. "12 34" no es un producto.
+        if (RE_LETRA.findAll(desc).count() < 3) return false
+        // Un numero largo y pelado, sin puntos de miles, es un folio o un
+        // codigo de barras, no un precio: en Chile $123.456 lleva puntos.
+        val t = precioTexto.trim()
+        if (!t.contains('.') && !t.contains(',') && t.length >= 6) return false
+        return precio >= 10.0 && precio <= 90_000_000.0
+    }
+
     /** El detalle: lo que se compro, antes del bloque de totales. */
     private fun leerItems(L: List<String>, fin: Int): List<Item> {
         val zona = L.subList(0, fin.coerceIn(0, L.size))
@@ -206,7 +250,8 @@ object LectorBoleta {
                 val u = cifra(ma.groupValues[2])
                 val d = limpiarDesc(ma.groupValues[3])
                 val t = cifra(ma.groupValues[4])
-                if (c != null && u != null && t != null && d.isNotEmpty()) {
+                if (c != null && u != null && t != null &&
+                    esProducto(d, ma.groupValues[4], t)) {
                     items.add(Item(d, c, u, t)); i++; continue
                 }
             }
@@ -218,7 +263,8 @@ object LectorBoleta {
                 val d = limpiarDesc(mc.groupValues[2])
                 val u = cifra(mc.groupValues[3])
                 val t = cifra(mc.groupValues[5])
-                if (c != null && u != null && t != null && d.length > 2) {
+                if (c != null && u != null && t != null &&
+                    esProducto(d, mc.groupValues[5], t)) {
                     items.add(Item(d, c, u, t)); i++; continue
                 }
             }
@@ -228,7 +274,31 @@ object LectorBoleta {
             if (mb != null) {
                 val d = limpiarDesc(mb.groupValues[2])
                 val t = cifra(mb.groupValues[3])
-                if (t != null && d.isNotEmpty()) {
+                if (t != null && esProducto(d, mb.groupValues[3], t)) {
+                    items.add(Item(d, 1, t, t)); i++; continue
+                }
+            }
+
+            // E) Tres columnas, sin cantidad: "7801 CAJA ESTANCA 200X100 3.269"
+            val me = RE_ITEM_E.find(l)
+            if (me != null) {
+                val sku = me.groupValues[1]
+                val d = limpiarDesc(me.groupValues[2])
+                val t = cifra(me.groupValues[3])
+                // El SKU tiene que traer al menos un digito: si no, la primera
+                // palabra del nombre se estaria yendo como codigo.
+                if (t != null && RE_TIENE_DIGITO.containsMatchIn(sku) &&
+                    esProducto(d, me.groupValues[3], t)) {
+                    items.add(Item("$d [$sku]", 1, t, t)); i++; continue
+                }
+            }
+
+            // F) Dos columnas, sin cantidad: "PAN HALLULLA KG 1.590"
+            val mf = RE_ITEM_F.find(l)
+            if (mf != null) {
+                val d = limpiarDesc(mf.groupValues[1])
+                val t = cifra(mf.groupValues[2])
+                if (t != null && esProducto(d, mf.groupValues[2], t)) {
                     items.add(Item(d, 1, t, t)); i++; continue
                 }
             }
