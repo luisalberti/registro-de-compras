@@ -33,6 +33,7 @@ private sealed class Pantalla {
     data object Escanear : Pantalla()
     data object Gastos : Pantalla()
     data object Ajustes : Pantalla()
+    data object Manual : Pantalla()
     data class Revisar(val lectura: LectorBoleta.Lectura) : Pantalla()
 }
 
@@ -131,6 +132,7 @@ private fun AppRoot() {
             onEscanear = { pantalla = Pantalla.Escanear },
             onGastos = { pantalla = Pantalla.Gastos },
             onAjustes = { pantalla = Pantalla.Ajustes },
+            onManual = { pantalla = Pantalla.Manual },
             pendientes = if (ctx.ajustes.haySincronizacion) docs.count { !it.subido } else -1,
             subiendo = subiendo,
             avisoNube = avisoNube,
@@ -167,6 +169,24 @@ private fun AppRoot() {
         is Pantalla.Gastos -> GastosScreen(
             docs = docs,
             onVolver = { pantalla = Pantalla.Inicio },
+        )
+
+        /* Compra a mano: la misma pantalla de revisar, con una lectura vacia
+           y la fecha de hoy puesta. Una compra en efectivo sin comprobante
+           necesita los mismos campos que una escaneada. */
+        is Pantalla.Manual -> RevisarScreen(
+            lectura = LectorBoleta.Lectura(
+                fecha = SimpleDateFormat("yyyy-MM-dd", Locale("es", "CL")).format(Date())),
+            manual = true,
+            onGuardar = { doc ->
+                docs.add(0, doc)
+                persistir()
+                scope.launch { sincronizar() }
+                // A diferencia del escaneo, aca se vuelve al inicio: teclear
+                // una compra es un acto suelto, no una pila.
+                pantalla = Pantalla.Inicio
+            },
+            onCancelar = { pantalla = Pantalla.Inicio },
         )
 
         is Pantalla.Escanear -> EscanearScreen(

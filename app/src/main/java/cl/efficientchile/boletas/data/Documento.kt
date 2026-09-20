@@ -32,6 +32,9 @@ data class Documento(
     val formaPago: String,    // efectivo | tarjeta | transferencia | ""
     val avisos: String,
     val items: List<LectorBoleta.Item> = emptyList(),
+    /** Fila del cashflow donde va este gasto. Ver Categorias. */
+    val categoria: String = "OTROS GASTOS",
+    val categoriaFila: Int = 26,
     /** Si ya quedo escrito en la planilla. Lo que no subio se reintenta. */
     val subido: Boolean = false,
 ) {
@@ -52,6 +55,8 @@ data class Documento(
             })
         }
         put("items", arr)
+        put("categoria", categoria)
+        put("categoriaFila", categoriaFila)
         put("subido", subido)
     }
 
@@ -85,6 +90,8 @@ data class Documento(
             formaPago = o.optString("formaPago"),
             avisos = o.optString("avisos"),
             items = itemsDeJson(o),
+            categoria = o.optString("categoria", "OTROS GASTOS"),
+            categoriaFila = o.optInt("categoriaFila", 26),
             subido = o.optBoolean("subido", false),
         )
 

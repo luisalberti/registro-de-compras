@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,6 +30,7 @@ fun HomeScreen(
     onExportar: () -> Unit,
     onGastos: () -> Unit,
     onAjustes: () -> Unit,
+    onManual: () -> Unit,
     onBorrar: (Documento) -> Unit,
     exportando: Boolean,
     /** Cuantas faltan por subir. -1 = no hay planilla configurada. */
@@ -55,12 +57,25 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onEscanear,
-                containerColor = Marino, contentColor = Blanco,
-                icon = { Icon(Icons.Default.Add, null) },
-                text = { Text("Escanear") },
-            )
+            /* Dos botones y no uno con menu: escanear es lo que se hace
+               noventa de cada cien veces y tiene que estar a un toque. El de
+               teclear a mano va mas chico y al lado, no escondido, porque
+               una compra en efectivo sin boleta es justo la que se pierde. */
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                SmallFloatingActionButton(
+                    onClick = onManual,
+                    containerColor = Blanco, contentColor = Marino,
+                ) { Icon(Icons.Default.Edit, "Agregar compra a mano") }
+                ExtendedFloatingActionButton(
+                    onClick = onEscanear,
+                    containerColor = Marino, contentColor = Blanco,
+                    icon = { Icon(Icons.Default.Add, null) },
+                    text = { Text("Escanear") },
+                )
+            }
         },
         bottomBar = {
             if (docs.isNotEmpty()) {
@@ -108,6 +123,10 @@ fun HomeScreen(
                     Spacer(Modifier.height(8.dp))
                     Text("Aprieta Escanear y fotografía la primera boleta.",
                         style = MaterialTheme.typography.bodyMedium, color = TintaSuave)
+                    Spacer(Modifier.height(20.dp))
+                    OutlinedButton(onClick = onManual) {
+                        Text("O agrega una compra en efectivo")
+                    }
                 }
                 return@Column
             }

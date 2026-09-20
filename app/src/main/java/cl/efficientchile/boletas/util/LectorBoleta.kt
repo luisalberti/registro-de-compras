@@ -56,6 +56,10 @@ object LectorBoleta {
         val rut: String? = null,
         val ultimos4: String? = null,
         val items: List<Item> = emptyList(),
+        /** Categoria del cashflow que la app propone, ver Categorias. */
+        val categoria: String = Categorias.POR_DEFECTO.nombre,
+        /** false = no reconocio el comercio y cayo en la de por defecto. */
+        val categoriaSegura: Boolean = false,
         val avisos: List<String> = emptyList(),
     ) {
         val sirve: Boolean get() = total != null
@@ -433,7 +437,9 @@ object LectorBoleta {
         if (numero == null) avisos += "No se encontró el número. Escríbelo a mano."
         if (items.isEmpty()) avisos += "No se pudo leer el detalle de productos."
 
-        return Lectura(total, neto, iva, numero, fecha, hora, rut, u4, items, avisos)
+        val propuesta = Categorias.proponer(L)
+        return Lectura(total, neto, iva, numero, fecha, hora, rut, u4, items,
+            propuesta.categoria.nombre, propuesta.segura, avisos)
     }
 
     /** Forma antigua, por si llega texto plano. Prefiere la de lineas. */

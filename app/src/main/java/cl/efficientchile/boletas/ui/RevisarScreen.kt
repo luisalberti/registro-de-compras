@@ -11,6 +11,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import cl.efficientchile.boletas.data.Documento
+import cl.efficientchile.boletas.util.Categorias
 import cl.efficientchile.boletas.util.Formato
 import cl.efficientchile.boletas.util.LectorBoleta
 
@@ -43,6 +44,11 @@ fun RevisarScreen(
     // texto: corregir letra por letra en el telefono es mas lento que
     // arreglarlo despues en la planilla.
     val items = remember { mutableStateListOf<LectorBoleta.Item>().apply { addAll(lectura.items) } }
+
+    // La categoria viene propuesta por el lector. Se muestra y se confirma:
+    // clasificar mal y guardar en silencio ensucia el cashflow para siempre.
+    var categoria by remember { mutableStateOf(Categorias.porNombre(lectura.categoria)) }
+    var eligiendo by remember { mutableStateOf(false) }
     val sumaItems = items.sumOf { Math.round(it.valorTotal) }.toInt()
 
     Scaffold(
@@ -77,11 +83,14 @@ fun RevisarScreen(
                                     formaPago = if (tarjeta.isNotEmpty()) "tarjeta" else "",
                                     avisos = lectura.avisos.joinToString(" · "),
                                     items = items.toList(),
+                                    categoria = categoria.nombre,
+                                    categoriaFila = categoria.fila,
                                 )
                             )
                         },
                         modifier = Modifier.fillMaxWidth().height(56.dp),
-                    ) { Text("Guardar y escanear otra", style = MaterialTheme.typography.labelLarge) }
+                    ) { Text("Guardar en ${categoria.nombre}",
+                        style = MaterialTheme.typography.labelLarge) }
                     TextButton(onClick = onCancelar, modifier = Modifier.fillMaxWidth()) {
                         Text("Descartar")
                     }
@@ -104,6 +113,30 @@ fun RevisarScreen(
                             color = MaterialTheme.colorScheme.error)
                         lectura.avisos.forEach {
                             Text("· $it", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+
+            Surface(
+                color = if (lectura.categoriaSegura) CyanPalido else Nieve,
+                shape = MaterialTheme.shapes.medium,
+                border = androidx.compose.foundation.BorderStroke(
+                    2.dp, if (lectura.categoriaSegura) CyanProfundo else Borde),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(14.dp)) {
+                    Text(
+                        if (lectura.categoriaSegura) "Se va a guardar en"
+                        else "No reconocí el comercio. Se va a guardar en",
+                        style = MaterialTheme.typography.bodySmall, color = TintaSuave)
+                    Spacer(Modifier.height(2.dp))
+                    Text("${categoria.grupo}  ›  ${categoria.nombre}",
+                        style = MaterialTheme.typography.titleMedium, color = Marino)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { eligiendo = true }) {
+                            Text("Cambiar categoría")
                         }
                     }
                 }
@@ -205,6 +238,56 @@ fun RevisarScreen(
                 "Corrige lo que haga falta. Nada se guarda hasta que aprietes Guardar.",
                 style = MaterialTheme.typography.bodySmall, color = TintaSuave)
             Spacer(Modifier.height(60.dp))
+        }
+
+        if (eligiendo) {
+            SelectorCategoria(
+                actual = categoria,
+                onElegir = { categoria = it },
+                onCerrar = { eligiendo = false },
+            )
+        }
+    }
+}
+
+/**
+ * La lista completa de categorias, agrupada como en la planilla.
+ *
+ * Se muestran las 23 y no solo las probables: cuando el usuario viene a
+ * cambiar la categoria es justamente porque la propuesta no servia, y
+ * esconderle opciones en ese momento es lo peor que se puede hacer.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SelectorCategoria(
+    actual: Categorias.Categoria,
+    onElegir: (Categorias.Categoria) -> Unit,
+    onCerrar: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onCerrar, containerColor = Blanco) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            Text("¿Dónde va este gasto?",
+                style = MaterialTheme.typography.titleMedium, color = Marino,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+            var grupoAnterior = ""
+            Categorias.TODAS.forEach { c ->
+                if (c.grupo != grupoAnterior) {
+                    grupoAnterior = c.grupo
+                    Text(c.grupo, style = MaterialTheme.typography.bodySmall,
+                        color = CyanProfundo, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(
+                            start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp))
+                }
+                Surface(
+                    onClick = { onElegir(c); onCerrar() },
+                    color = if (c.nombre == actual.nombre) CyanPalido else Blanco,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(c.nombre, style = MaterialTheme.typography.bodyLarge,
+                        color = Tinta,
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp))
+                }
+            }
         }
     }
 }

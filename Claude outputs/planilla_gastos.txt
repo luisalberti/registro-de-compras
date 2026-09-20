@@ -14,13 +14,29 @@
  * No borra nada ni toca otras hojas que tengas.
  */
 
+/* ------------------------------------------------------------------
+   TU CLAVE. Cambia el texto de abajo por cualquier cosa larga e
+   inventada, sin espacios. Por ejemplo: 'perro-azul-7741-quillota'
+
+   Sirve para esto: la direccion del script queda abierta porque la app
+   no tiene cuenta de Google con la cual identificarse. Con clave, aunque
+   alguien consiga la direccion, no puede escribir nada sin ella.
+
+   Despues, a la direccion que pegas en la app le agregas al final:
+       ?clave=perro-azul-7741-quillota
+
+   Si dejas la clave vacia (''), el script acepta a cualquiera. No es
+   lo recomendable, pero sirve para probar.
+   ------------------------------------------------------------------ */
+var CLAVE = 'gastos-4417-quillota';
+
 var HOJA_DOC = 'Documentos';
 var HOJA_DET = 'Detalle';
 var HOJA_RES = 'Resumen';
 
 var COL_DOC = ['ID', 'Fecha', 'Mes', 'Ano', 'Tipo', 'N Documento', 'RUT emisor',
-               'Neto', 'IVA', 'Total', 'Tarjeta', 'Forma pago', 'Avisos',
-               'Recibido'];
+               'Neto', 'IVA', 'Total', 'Categoria', 'Tarjeta', 'Forma pago',
+               'Avisos', 'Recibido'];
 var COL_DET = ['ID', 'Fecha', 'N Documento', 'Descripcion', 'Cantidad',
                'Valor unitario', 'Valor total'];
 
@@ -33,6 +49,15 @@ function doPost(e) {
     return responder({ ok: false, error: 'ocupado' });
   }
   try {
+    // La clave viaja en la direccion, no en el cuerpo, para poder cambiarla
+    // sin tocar la app: basta con pegar una direccion nueva.
+    if (CLAVE !== '') {
+      var recibida = (e && e.parameter && e.parameter.clave) || '';
+      if (recibida !== CLAVE) {
+        return responder({ ok: false, error: 'clave incorrecta' });
+      }
+    }
+
     var datos = JSON.parse(e.postData.contents);
 
     if (datos.prueba) {
@@ -64,6 +89,7 @@ function doPost(e) {
       numero(datos.neto),
       numero(datos.iva),
       numero(datos.total),
+      datos.categoria || '',
       datos.tarjeta || '',
       datos.formaPago || '',
       datos.avisos || '',
@@ -90,7 +116,9 @@ function doPost(e) {
              .setValues(filas);
     }
 
-    return responder({ ok: true, mensaje: 'guardado' });
+    var donde = alCashflow(libro, datos, fecha);
+
+    return responder({ ok: true, mensaje: 'guardado', cashflow: donde });
   } catch (err) {
     return responder({ ok: false, error: String(err) });
   } finally {
@@ -99,7 +127,13 @@ function doPost(e) {
 }
 
 /** Abrir la direccion en el navegador tiene que decir algo util. */
-function doGet() {
+function doGet(e) {
+  if (CLAVE !== '') {
+    var recibida = (e && e.parameter && e.parameter.clave) || '';
+    if (recibida !== CLAVE) {
+      return responder({ ok: false, error: 'clave incorrecta' });
+    }
+  }
   return responder({ ok: true, mensaje: 'La planilla esta escuchando.' });
 }
 
@@ -146,6 +180,123 @@ function crearHoja(libro, nombre, columnas) {
     hoja.setFrozenRows(1);
   }
   return hoja;
+}
+
+var MESES = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO',
+             'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'];
+
+/**
+ * Lleva el monto a la hoja del mes del cashflow: fila de la categoria,
+ * columna del dia.
+ *
+ * No reemplaza lo que haya en la celda: lo SUMA, dejandolo como formula.
+ * Si la celda decia =5000+7500 queda =5000+7500+11290. Es la misma forma en
+ * que Luis la escribe a mano, asi que el historial de lo que compuso ese dia
+ * no se pierde y el numero se puede desarmar mirando.
+ *
+ * Si algo no calza -no existe la hoja del mes, no aparece el dia, no esta la
+ * categoria- no escribe nada y devuelve el motivo. Escribir en la celda
+ * equivocada de un cashflow es peor que no escribir.
+ */
+function alCashflow(libro, datos, fecha) {
+  if (!fecha || fecha.length < 10) return 'sin fecha, no se llevo al cashflow';
+  var total = Number(datos.total);
+  if (!total || total <= 0) return 'sin total, no se llevo al cashflow';
+
+  var mes = Number(fecha.substring(5, 7));
+  var dia = Number(fecha.substring(8, 10));
+  var nombreMes = MESES[mes - 1];
+
+  var hoja = hojaDelMes(libro, nombreMes);
+  if (!hoja) return 'no existe la hoja GASTOS ' + nombreMes;
+
+  var col = columnaDelDia(hoja, dia);
+  if (col < 0) return 'no encontre el dia ' + dia + ' en GASTOS ' + nombreMes;
+
+  var fila = filaDeCategoria(hoja, datos.categoria, Number(datos.categoriaFila));
+  if (fila < 0) return 'no encontre la categoria ' + datos.categoria;
+
+  var celda = hoja.getRange(fila, col);
+  var formula = celda.getFormula();
+  var valor = celda.getValue();
+
+  if (formula && formula.charAt(0) === '=') {
+    celda.setFormula(formula + '+' + total);
+  } else if (valor !== '' && valor !== null && !isNaN(Number(valor))) {
+    celda.setFormula('=' + Number(valor) + '+' + total);
+  } else {
+    celda.setValue(total);
+  }
+  return 'GASTOS ' + nombreMes + ' · ' + datos.categoria + ' · dia ' + dia;
+}
+
+/**
+ * La hoja del mes. Se aceptan las dos formas en que Luis las nombra:
+ * "GASTOS AGOSTO" y "GASTOS AGOSTO 2026".
+ *
+ * Si no existe, se copia la ultima hoja GASTOS que haya y se le borran los
+ * dias. Copiar y no crear de cero es a proposito: asi la hoja nueva hereda
+ * las categorias, los presupuestos y las formulas de totales que Luis
+ * ajusto a mano, en vez de una version mia que se le va a parecer poco.
+ */
+function hojaDelMes(libro, nombreMes) {
+  var exacto = libro.getSheetByName('GASTOS ' + nombreMes);
+  if (exacto) return exacto;
+
+  var hojas = libro.getSheets();
+  var ultima = null;
+  for (var i = 0; i < hojas.length; i++) {
+    var n = hojas[i].getName();
+    if (n.indexOf('GASTOS ' + nombreMes) === 0) return hojas[i];
+    if (n.indexOf('GASTOS ') === 0) ultima = hojas[i];
+  }
+  if (!ultima) return null;
+
+  var nueva = ultima.copyTo(libro).setName('GASTOS ' + nombreMes);
+  // Se borran solo las celdas de dias; las categorias, los presupuestos y
+  // las filas de totales quedan como estaban.
+  nueva.getRange(4, 7, 23, 31).clearContent();
+  return nueva;
+}
+
+/**
+ * La columna del dia, contando desde donde esta el 1.
+ *
+ * No se busca el numero del dia directo porque la fila empieza con los
+ * ultimos dias del mes anterior: en la hoja de agosto la fila arranca en 29,
+ * 30, 31 y recien despues viene el 1. Buscar "29" encontraria el de julio.
+ */
+function columnaDelDia(hoja, dia) {
+  var fila = hoja.getRange(3, 7, 1, 40).getValues()[0];
+  var inicio = -1;
+  for (var i = 0; i < fila.length; i++) {
+    if (Number(fila[i]) === 1) { inicio = i; break; }
+  }
+  if (inicio < 0) return -1;
+  var idx = inicio + (dia - 1);
+  if (idx < 0 || idx >= fila.length) return -1;
+  if (Number(fila[idx]) !== dia) return -1;
+  return 7 + idx;
+}
+
+/**
+ * La fila de la categoria. Manda el nombre, no el numero.
+ *
+ * El numero de fila que manda la app es solo la red de seguridad: si Luis
+ * agrega o mueve una categoria en su planilla, el nombre sigue calzando y el
+ * numero ya no. Buscar por nombre primero es lo que hace que la integracion
+ * sobreviva a que el duenio edite su propia hoja.
+ */
+function filaDeCategoria(hoja, nombre, filaSugerida) {
+  if (nombre) {
+    var col = hoja.getRange(4, 4, 23, 1).getValues();
+    var buscado = String(nombre).trim().toUpperCase();
+    for (var i = 0; i < col.length; i++) {
+      if (String(col[i][0]).trim().toUpperCase() === buscado) return 4 + i;
+    }
+  }
+  if (filaSugerida >= 4 && filaSugerida <= 26) return filaSugerida;
+  return -1;
 }
 
 /**
