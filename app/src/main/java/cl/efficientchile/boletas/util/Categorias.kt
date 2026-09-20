@@ -133,11 +133,54 @@ object Categorias {
         val segura: Boolean get() = aciertos > 0
     }
 
+    /**
+     * Las reglas que la app se bajo de la planilla.
+     *
+     * Mandan sobre las de fabrica: si el usuario enseño que "COMERCIAL EL
+     * ROBLE" va en FERRETERIA, esa correccion vale mas que cualquier
+     * palabra generica que venga adentro del programa.
+     */
+    @Volatile
+    private var aprendidas: List<Pair<String, String>> = emptyList()
+
+    fun ponerReglas(lista: List<Pair<String, String>>) {
+        aprendidas = lista.filter { it.first.isNotBlank() && it.second.isNotBlank() }
+    }
+
+    fun cuantasAprendidas(): Int = aprendidas.size
+
+    /**
+     * El nombre del comercio: las primeras lineas con letras de verdad.
+     *
+     * Es lo que se manda a la planilla para aprender. Se toman hasta tres
+     * lineas porque el nombre suele venir partido ("SUPERMERCADO" en una,
+     * "LOS CISNES LTDA" en la siguiente), y se descartan las que son puros
+     * numeros, que son el RUT o el folio.
+     */
+    fun comercio(lineas: List<String>): String {
+        val buenas = lineas.take(6).filter { l ->
+            RE_LETRAS.findAll(l).count() >= 4 && !RE_DESCARTE.containsMatchIn(l)
+        }
+        return buenas.take(2).joinToString(" ").take(60).trim()
+    }
+
+    private val RE_LETRAS = Regex("""[A-Za-z]""")
+    private val RE_DESCARTE = Regex(
+        """RUT|R\.U\.T|BOLETA|FACTURA|ELECTRONIC|S\.?I\.?I""")
+
     fun proponer(lineas: List<String>): Propuesta {
         val texto = lineas.joinToString(" ") { sinTildes(it).uppercase() }
             .replace(ESPACIOS, " ")
         var mejor = POR_DEFECTO
         var puntos = 0
+        // Primero lo aprendido. Una coincidencia aprendida vale mas que
+        // varias de fabrica, por eso suma de a dos.
+        for ((palabra, cat) in aprendidas) {
+            if (texto.contains(palabra)) {
+                val p = 2
+                if (p > puntos) { puntos = p; mejor = porNombre(cat) }
+            }
+        }
         for ((nombre, palabras) in REGLAS) {
             val p = palabras.count { texto.contains(it) }
             if (p > puntos) { puntos = p; mejor = porNombre(nombre) }

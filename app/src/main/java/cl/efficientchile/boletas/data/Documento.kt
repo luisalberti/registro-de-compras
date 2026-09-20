@@ -32,6 +32,10 @@ data class Documento(
     val formaPago: String,    // efectivo | tarjeta | transferencia | ""
     val avisos: String,
     val items: List<LectorBoleta.Item> = emptyList(),
+    /** Nombre del comercio, para el aprendizaje de la planilla. */
+    val comercio: String = "",
+    /** Si la categoria la adivino la app sin reconocer el comercio. */
+    val categoriaDudosa: Boolean = false,
     /** Fila del cashflow donde va este gasto. Ver Categorias. */
     val categoria: String = "OTROS GASTOS",
     val categoriaFila: Int = 26,
@@ -55,6 +59,8 @@ data class Documento(
             })
         }
         put("items", arr)
+        put("comercio", comercio)
+        put("categoriaDudosa", categoriaDudosa)
         put("categoria", categoria)
         put("categoriaFila", categoriaFila)
         put("subido", subido)
@@ -90,6 +96,8 @@ data class Documento(
             formaPago = o.optString("formaPago"),
             avisos = o.optString("avisos"),
             items = itemsDeJson(o),
+            comercio = o.optString("comercio"),
+            categoriaDudosa = o.optBoolean("categoriaDudosa", false),
             categoria = o.optString("categoria", "OTROS GASTOS"),
             categoriaFila = o.optInt("categoriaFila", 26),
             subido = o.optBoolean("subido", false),

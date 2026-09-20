@@ -15,9 +15,11 @@ import cl.efficientchile.boletas.ui.AjustesScreen
 import cl.efficientchile.boletas.ui.EscanearScreen
 import cl.efficientchile.boletas.ui.GastosScreen
 import cl.efficientchile.boletas.ui.HomeScreen
+import cl.efficientchile.boletas.ui.PlanillaScreen
 import cl.efficientchile.boletas.ui.RevisarScreen
 import cl.efficientchile.boletas.ui.TemaInventario
 import cl.efficientchile.boletas.util.Compartir
+import cl.efficientchile.boletas.util.Categorias
 import cl.efficientchile.boletas.util.LectorBoleta
 import cl.efficientchile.boletas.util.Nube
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +36,7 @@ private sealed class Pantalla {
     data object Gastos : Pantalla()
     data object Ajustes : Pantalla()
     data object Manual : Pantalla()
+    data object Planilla : Pantalla()
     data class Revisar(val lectura: LectorBoleta.Lectura) : Pantalla()
 }
 
@@ -101,7 +104,9 @@ private fun AppRoot() {
         subiendo = true
         try {
             for (d in pendientes) {
-                val r = withContext(Dispatchers.IO) { Nube.enviar(url, d) }
+                val r = withContext(Dispatchers.IO) {
+                    Nube.enviar(url, d, d.comercio, d.categoriaDudosa && d.comercio.isNotEmpty())
+                }
                 if (r.ok) {
                     val i = docs.indexOfFirst { it.id == d.id }
                     if (i >= 0) docs[i] = docs[i].copy(subido = true)
@@ -120,10 +125,24 @@ private fun AppRoot() {
         }
     }
 
+    /**
+     * Se baja de la planilla lo que ha aprendido sobre tus comercios.
+     *
+     * Va en cada arranque y no una sola vez: si corregiste una categoria
+     * desde el computador, el telefono tiene que enterarse. Si no hay
+     * señal, se queda con lo que traia adentro y sigue funcionando.
+     */
+    suspend fun bajarReglas() {
+        if (!ctx.ajustes.haySincronizacion) return
+        val url = ctx.ajustes.urlPlanilla
+        val r = withContext(Dispatchers.IO) { Nube.reglas(url) }
+        if (r.isNotEmpty()) Categorias.ponerReglas(r.map { it.palabra to it.categoria })
+    }
+
     // Al abrir la app se reintenta lo que quedo pendiente de la calle. Va
     // DESPUES de declarar sincronizar(): en Kotlin una funcion local no
     // existe antes de su declaracion.
-    LaunchedEffect(Unit) { sincronizar() }
+    LaunchedEffect(Unit) { sincronizar(); bajarReglas() }
 
     when (val p = pantalla) {
         is Pantalla.Inicio -> HomeScreen(
@@ -133,6 +152,7 @@ private fun AppRoot() {
             onGastos = { pantalla = Pantalla.Gastos },
             onAjustes = { pantalla = Pantalla.Ajustes },
             onManual = { pantalla = Pantalla.Manual },
+            onPlanilla = { pantalla = Pantalla.Planilla },
             pendientes = if (ctx.ajustes.haySincronizacion) docs.count { !it.subido } else -1,
             subiendo = subiendo,
             avisoNube = avisoNube,
@@ -161,8 +181,13 @@ private fun AppRoot() {
             onGuardar = { u ->
                 ctx.ajustes.urlPlanilla = u
                 avisoNube = null
-                scope.launch { sincronizar() }
+                scope.launch { sincronizar(); bajarReglas() }
             },
+            onVolver = { pantalla = Pantalla.Inicio },
+        )
+
+        is Pantalla.Planilla -> PlanillaScreen(
+            url = ctx.ajustes.urlPlanilla,
             onVolver = { pantalla = Pantalla.Inicio },
         )
 

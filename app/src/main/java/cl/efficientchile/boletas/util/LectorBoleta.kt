@@ -56,6 +56,8 @@ object LectorBoleta {
         val rut: String? = null,
         val ultimos4: String? = null,
         val items: List<Item> = emptyList(),
+        /** El nombre del comercio, para que la planilla pueda aprenderlo. */
+        val comercio: String = "",
         /** Categoria del cashflow que la app propone, ver Categorias. */
         val categoria: String = Categorias.POR_DEFECTO.nombre,
         /** false = no reconocio el comercio y cayo en la de por defecto. */
@@ -439,6 +441,7 @@ object LectorBoleta {
 
         val propuesta = Categorias.proponer(L)
         return Lectura(total, neto, iva, numero, fecha, hora, rut, u4, items,
+            Categorias.comercio(L),
             propuesta.categoria.nombre, propuesta.segura, avisos)
     }
 

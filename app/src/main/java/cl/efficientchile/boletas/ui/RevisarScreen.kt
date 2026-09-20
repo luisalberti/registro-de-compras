@@ -103,6 +103,11 @@ fun RevisarScreen(
                                     },
                                     avisos = lectura.avisos.joinToString(" · "),
                                     items = items.toList(),
+                                    comercio = lectura.comercio,
+                                    // Si el lector no reconocio el comercio,
+                                    // lo que el usuario elija aca es una
+                                    // enseñanza: se manda a la planilla.
+                                    categoriaDudosa = !lectura.categoriaSegura,
                                     categoria = categoria.nombre,
                                     categoriaFila = categoria.fila,
                                 )
@@ -153,6 +158,12 @@ fun RevisarScreen(
                     Spacer(Modifier.height(2.dp))
                     Text("${categoria.grupo}  ›  ${categoria.nombre}",
                         style = MaterialTheme.typography.titleMedium, color = Marino)
+                    if (!manual && lectura.comercio.isNotEmpty()) {
+                        Text(
+                            if (lectura.categoriaSegura) lectura.comercio
+                            else "${lectura.comercio} — se va a aprender dónde va",
+                            style = MaterialTheme.typography.bodySmall, color = TintaSuave)
+                    }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { eligiendo = true }) {

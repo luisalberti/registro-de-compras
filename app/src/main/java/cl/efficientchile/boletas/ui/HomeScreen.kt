@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,6 +32,7 @@ fun HomeScreen(
     onGastos: () -> Unit,
     onAjustes: () -> Unit,
     onManual: () -> Unit,
+    onPlanilla: () -> Unit,
     onBorrar: (Documento) -> Unit,
     exportando: Boolean,
     /** Cuantas faltan por subir. -1 = no hay planilla configurada. */
@@ -49,6 +51,11 @@ fun HomeScreen(
                 actions = {
                     if (docs.isNotEmpty()) {
                         TextButton(onClick = onGastos) { Text("Mis gastos", color = Blanco) }
+                    }
+                    if (pendientes >= 0) {
+                        IconButton(onClick = onPlanilla) {
+                            Icon(Icons.Default.List, "Mi planilla", tint = Blanco)
+                        }
                     }
                     IconButton(onClick = onAjustes) {
                         Icon(Icons.Default.Settings, "Planilla en la nube", tint = Blanco)

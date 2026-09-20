@@ -1,0 +1,387 @@
+/**
+ * ==========================================================================
+ *  CASHFLOW  ·  el puente entre la app del teléfono y esta planilla
+ * ==========================================================================
+ *
+ * Pega esto en Extensiones > Apps Script de TU PLANILLA DE CASHFLOW (la que
+ * tiene las hojas MOVIMIENTOS, CATEGORIAS, ENERO...), guarda, y publicalo
+ * como aplicacion web con acceso "Cualquier usuario".
+ *
+ * Qué hace:
+ *   - Recibe cada boleta y escribe tres cosas: la fila del cashflow en
+ *     MOVIMIENTOS, el respaldo en DOCUMENTOS, y los productos en DETALLE.
+ *   - Aprende: si le enseñas donde va un comercio nuevo, lo anota en
+ *     APRENDIZAJE y la proxima vez la app ya lo sabe.
+ *   - Responde consultas de la app: el resumen del mes, los ultimos
+ *     movimientos, y la lista de reglas de categoria.
+ *   - Deja editar y borrar movimientos desde el telefono.
+ */
+
+/* ------------------------------------------------------------------
+   TU CLAVE. A la direccion que pegas en la app le agregas al final:
+       ?clave=gastos-4417-quillota
+   ------------------------------------------------------------------ */
+var CLAVE = 'gastos-4417-quillota';
+
+var H_MOV = 'MOVIMIENTOS';
+var H_CAT = 'CATEGORIAS';
+var H_DOC = 'DOCUMENTOS';
+var H_DET = 'DETALLE';
+var H_APR = 'APRENDIZAJE';
+
+// MOVIMIENTOS: A fecha, B tipo, C grupo, D categoria, E clase, F monto,
+//              G detalle, H documento, I origen, J id
+var COL_ID_MOV = 10;
+
+function doPost(e) {
+  var candado = LockService.getScriptLock();
+  try { candado.waitLock(20000); }
+  catch (err) { return responder({ ok: false, error: 'ocupado' }); }
+  try {
+    if (!claveOk(e)) return responder({ ok: false, error: 'clave incorrecta' });
+    var d = JSON.parse(e.postData.contents);
+    var libro = SpreadsheetApp.getActiveSpreadsheet();
+
+    switch (d.accion || 'documento') {
+      case 'prueba':   return responder({ ok: true, mensaje: 'conexion correcta' });
+      case 'editar':   return editar(libro, d);
+      case 'borrar':   return borrar(libro, d);
+      case 'aprender': return aprender(libro, d.palabra, d.categoria, 'a mano');
+      default:         return guardarDocumento(libro, d);
+    }
+  } catch (err) {
+    return responder({ ok: false, error: String(err) });
+  } finally {
+    candado.releaseLock();
+  }
+}
+
+/** Las consultas de la app. Todas piden la clave igual que los envios. */
+function doGet(e) {
+  if (!claveOk(e)) return responder({ ok: false, error: 'clave incorrecta' });
+  var libro = SpreadsheetApp.getActiveSpreadsheet();
+  var q = (e && e.parameter && e.parameter.q) || 'hola';
+  try {
+    switch (q) {
+      case 'reglas':      return responder({ ok: true, reglas: leerReglas(libro) });
+      case 'resumen':     return responder({ ok: true, resumen: leerResumen(libro, e) });
+      case 'movimientos': return responder({ ok: true, movimientos: ultimosMovimientos(libro, e) });
+      case 'categorias':  return responder({ ok: true, categorias: leerCategorias(libro) });
+      default: return responder({ ok: true, mensaje: 'La planilla esta escuchando.' });
+    }
+  } catch (err) {
+    return responder({ ok: false, error: String(err) });
+  }
+}
+
+function claveOk(e) {
+  if (CLAVE === '') return true;
+  return ((e && e.parameter && e.parameter.clave) || '') === CLAVE;
+}
+
+function responder(o) {
+  return ContentService.createTextOutput(JSON.stringify(o))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function num(v) {
+  if (v === null || v === undefined || v === '') return '';
+  var n = Number(v);
+  return isNaN(n) ? '' : n;
+}
+
+// =========================================================================
+//  GUARDAR UNA BOLETA
+// =========================================================================
+function guardarDocumento(libro, d) {
+  var mov = libro.getSheetByName(H_MOV);
+  if (!mov) return responder({ ok: false, error: 'no encuentro la hoja ' + H_MOV });
+
+  // El id es lo que permite que el telefono reintente sin miedo.
+  if (existeId(mov, COL_ID_MOV, d.id)) {
+    return responder({ ok: true, mensaje: 'ya estaba' });
+  }
+
+  var fecha = aFecha(d.fecha);
+  var total = Number(d.total) || 0;
+  var cat = d.categoria || 'OTROS GASTOS';
+  var info = datosCategoria(libro, cat);
+
+  mov.appendRow([
+    fecha, 'EGRESO', info.grupo, cat, info.clase, total,
+    d.comercio || d.detalle || '', d.numero || '', 'App', String(d.id),
+  ]);
+
+  var doc = libro.getSheetByName(H_DOC);
+  if (doc) {
+    doc.appendRow([
+      String(d.id), fecha, d.tipo || '', d.numero || '', d.rut || '',
+      num(d.neto), num(d.iva), num(d.total), cat, d.formaPago || '',
+      d.avisos || '', new Date(),
+    ]);
+  }
+
+  var items = d.items || [];
+  var det = libro.getSheetByName(H_DET);
+  if (det && items.length > 0) {
+    var filas = [];
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      filas.push([String(d.id), fecha, d.numero || '', it.descripcion || '',
+                  num(it.cantidad), num(it.valorUnitario), num(it.valorTotal), cat]);
+    }
+    det.getRange(det.getLastRow() + 1, 1, filas.length, 8).setValues(filas);
+  }
+
+  // El aprendizaje: si la app dice que NO reconocio el comercio pero el
+  // usuario eligio una categoria, ese par se guarda. Es lo que hace que la
+  // proxima boleta del mismo lugar salga clasificada sola.
+  var aprendido = '';
+  if (d.comercio && d.aprender) {
+    aprender(libro, d.comercio, cat, 'boleta');
+    aprendido = d.comercio + ' -> ' + cat;
+  }
+
+  return responder({ ok: true, mensaje: 'guardado', aprendido: aprendido });
+}
+
+function aFecha(txt) {
+  if (!txt || txt.length < 10) return '';
+  return new Date(Number(txt.substring(0,4)), Number(txt.substring(5,7)) - 1,
+                  Number(txt.substring(8,10)));
+}
+
+function existeId(hoja, col, id) {
+  var ultima = hoja.getLastRow();
+  if (ultima < 4) return false;
+  var vals = hoja.getRange(4, col, ultima - 3, 1).getValues();
+  var buscado = String(id);
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][0]) === buscado) return true;
+  }
+  return false;
+}
+
+/** Grupo y clase de una categoria, sacados de la hoja CATEGORIAS. */
+function datosCategoria(libro, nombre) {
+  var cat = libro.getSheetByName(H_CAT);
+  if (!cat) return { grupo: '', clase: 'GASTO' };
+  var vals = cat.getRange(4, 1, Math.max(1, cat.getLastRow() - 3), 6).getValues();
+  var buscado = String(nombre).trim().toUpperCase();
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][2]).trim().toUpperCase() === buscado) {
+      return { grupo: vals[i][1], clase: vals[i][3] || 'GASTO' };
+    }
+  }
+  return { grupo: 'OTROS', clase: 'GASTO' };
+}
+
+// =========================================================================
+//  APRENDIZAJE
+// =========================================================================
+/**
+ * Anota que tal palabra va en tal categoria.
+ *
+ * Si la palabra ya estaba, no duplica: suma una vez mas y actualiza la
+ * fecha. Y si la categoria cambio, se queda con la nueva — el usuario
+ * corrigiendo vale mas que lo que se anoto antes.
+ */
+function aprender(libro, palabra, categoria, origen) {
+  if (!palabra || !categoria) return responder({ ok: false, error: 'falta palabra o categoria' });
+  var hoja = libro.getSheetByName(H_APR);
+  if (!hoja) return responder({ ok: false, error: 'no encuentro la hoja ' + H_APR });
+
+  var clave = String(palabra).trim().toUpperCase();
+  var ultima = hoja.getLastRow();
+  if (ultima >= 4) {
+    var vals = hoja.getRange(4, 1, ultima - 3, 2).getValues();
+    for (var i = 0; i < vals.length; i++) {
+      if (String(vals[i][0]).trim().toUpperCase() === clave) {
+        var f = 4 + i;
+        hoja.getRange(f, 2).setValue(categoria);
+        hoja.getRange(f, 3).setValue(Number(hoja.getRange(f, 3).getValue() || 0) + 1);
+        hoja.getRange(f, 5).setValue(new Date());
+        return responder({ ok: true, mensaje: 'ya lo sabia, lo actualice' });
+      }
+    }
+  }
+  hoja.appendRow([clave, categoria, 1, new Date(), new Date(), origen || 'app']);
+  return responder({ ok: true, mensaje: 'aprendido' });
+}
+
+/**
+ * Las reglas que la app se descarga: palabra -> categoria.
+ *
+ * Salen de dos lugares y en este orden: primero APRENDIZAJE, porque es lo
+ * que el usuario enseño con casos reales, y despues las PALABRAS CLAVE de
+ * CATEGORIAS, que son las de fabrica. Lo aprendido manda sobre lo de
+ * fabrica: si alguien corrigio una clasificacion, fue por algo.
+ */
+function leerReglas(libro) {
+  var reglas = [];
+  var apr = libro.getSheetByName(H_APR);
+  if (apr && apr.getLastRow() >= 4) {
+    var va = apr.getRange(4, 1, apr.getLastRow() - 3, 2).getValues();
+    for (var i = 0; i < va.length; i++) {
+      if (va[i][0] && va[i][1]) {
+        reglas.push({ p: String(va[i][0]).toUpperCase(), c: String(va[i][1]) });
+      }
+    }
+  }
+  var cat = libro.getSheetByName(H_CAT);
+  if (cat && cat.getLastRow() >= 4) {
+    var vc = cat.getRange(4, 1, cat.getLastRow() - 3, 6).getValues();
+    for (var j = 0; j < vc.length; j++) {
+      var nombre = vc[j][2];
+      var palabras = String(vc[j][5] || '');
+      if (!nombre || !palabras) continue;
+      var partes = palabras.split(',');
+      for (var k = 0; k < partes.length; k++) {
+        var p = partes[k].trim().toUpperCase();
+        if (p) reglas.push({ p: p, c: String(nombre) });
+      }
+    }
+  }
+  return reglas;
+}
+
+function leerCategorias(libro) {
+  var cat = libro.getSheetByName(H_CAT);
+  var out = [];
+  if (!cat || cat.getLastRow() < 4) return out;
+  var vals = cat.getRange(4, 1, cat.getLastRow() - 3, 5).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    if (vals[i][2]) {
+      out.push({ tipo: vals[i][0], grupo: vals[i][1], nombre: vals[i][2],
+                 clase: vals[i][3], presupuesto: Number(vals[i][4] || 0) });
+    }
+  }
+  return out;
+}
+
+// =========================================================================
+//  CONSULTAS DESDE LA APP
+// =========================================================================
+/**
+ * El resumen de un mes, calculado aca y no en el telefono.
+ *
+ * Se calcula sobre MOVIMIENTOS y no leyendo la hoja del mes, porque esa
+ * hoja son formulas y Apps Script veria valores que pueden estar sin
+ * recalcular. La base siempre dice la verdad.
+ */
+function leerResumen(libro, e) {
+  var hoy = new Date();
+  var anio = Number((e && e.parameter && e.parameter.anio) || hoy.getFullYear());
+  var mes = Number((e && e.parameter && e.parameter.mes) || (hoy.getMonth() + 1));
+  var mov = libro.getSheetByName(H_MOV);
+  var r = { anio: anio, mes: mes, ingresos: 0, egresos: 0, ahorro: 0,
+            deuda: 0, documentos: 0, categorias: [] };
+  if (!mov || mov.getLastRow() < 4) return r;
+
+  var vals = mov.getRange(4, 1, mov.getLastRow() - 3, 10).getValues();
+  var porCat = {};
+  for (var i = 0; i < vals.length; i++) {
+    var f = vals[i][0];
+    if (!(f instanceof Date)) continue;
+    if (f.getFullYear() !== anio || (f.getMonth() + 1) !== mes) continue;
+    var monto = Number(vals[i][5] || 0);
+    if (!monto) continue;
+    r.documentos++;
+    if (String(vals[i][1]).toUpperCase() === 'INGRESO') {
+      r.ingresos += monto;
+    } else {
+      r.egresos += monto;
+      var clase = String(vals[i][4] || 'GASTO').toUpperCase();
+      if (clase === 'AHORRO') r.ahorro += monto;
+      if (clase === 'DEUDA') r.deuda += monto;
+      var c = String(vals[i][3] || 'SIN CATEGORIA');
+      porCat[c] = (porCat[c] || 0) + monto;
+    }
+  }
+  var lista = [];
+  for (var k in porCat) lista.push({ categoria: k, monto: porCat[k] });
+  lista.sort(function (a, b) { return b.monto - a.monto; });
+  r.categorias = lista.slice(0, 10);
+  r.saldo = r.ingresos - r.egresos;
+  return r;
+}
+
+/** Los ultimos movimientos, para poder mirarlos y corregirlos desde la app. */
+function ultimosMovimientos(libro, e) {
+  var cuantos = Number((e && e.parameter && e.parameter.n) || 30);
+  var mov = libro.getSheetByName(H_MOV);
+  var out = [];
+  if (!mov || mov.getLastRow() < 4) return out;
+  var ultima = mov.getLastRow();
+  var desde = Math.max(4, ultima - cuantos + 1);
+  var vals = mov.getRange(desde, 1, ultima - desde + 1, 10).getValues();
+  for (var i = vals.length - 1; i >= 0; i--) {
+    var f = vals[i][0];
+    if (!f) continue;
+    out.push({
+      fila: desde + i,
+      fecha: (f instanceof Date) ? Utilities.formatDate(f, 'GMT-4', 'yyyy-MM-dd') : String(f),
+      tipo: vals[i][1], grupo: vals[i][2], categoria: vals[i][3],
+      clase: vals[i][4], monto: Number(vals[i][5] || 0),
+      detalle: vals[i][6], documento: vals[i][7], origen: vals[i][8],
+      id: String(vals[i][9]),
+    });
+  }
+  return out;
+}
+
+// =========================================================================
+//  EDITAR Y BORRAR DESDE LA APP
+// =========================================================================
+/**
+ * Cambia un movimiento ya escrito.
+ *
+ * Se ubica por ID y no por numero de fila: si alguien agrego o borro filas
+ * en el computador mientras tanto, la fila cambio de lugar pero el id no.
+ * Editar por fila seria pisar el movimiento equivocado.
+ */
+function editar(libro, d) {
+  var mov = libro.getSheetByName(H_MOV);
+  if (!mov) return responder({ ok: false, error: 'no encuentro ' + H_MOV });
+  var f = filaPorId(mov, COL_ID_MOV, d.id);
+  if (f < 0) return responder({ ok: false, error: 'no encuentro ese movimiento' });
+
+  if (d.categoria) {
+    var info = datosCategoria(libro, d.categoria);
+    mov.getRange(f, 3).setValue(info.grupo);
+    mov.getRange(f, 4).setValue(d.categoria);
+    mov.getRange(f, 5).setValue(info.clase);
+    // Corregir una categoria es la mejor señal de aprendizaje que existe:
+    // el usuario esta diciendo explicitamente donde iba.
+    if (d.comercio) aprender(libro, d.comercio, d.categoria, 'correccion');
+  }
+  if (d.monto !== undefined && d.monto !== null && d.monto !== '') {
+    mov.getRange(f, 6).setValue(Number(d.monto));
+  }
+  if (d.fecha) mov.getRange(f, 1).setValue(aFecha(d.fecha));
+  if (d.detalle !== undefined) mov.getRange(f, 7).setValue(d.detalle);
+
+  return responder({ ok: true, mensaje: 'actualizado', fila: f });
+}
+
+function borrar(libro, d) {
+  var mov = libro.getSheetByName(H_MOV);
+  if (!mov) return responder({ ok: false, error: 'no encuentro ' + H_MOV });
+  var f = filaPorId(mov, COL_ID_MOV, d.id);
+  if (f < 0) return responder({ ok: false, error: 'no encuentro ese movimiento' });
+  mov.deleteRow(f);
+  // El respaldo del documento se deja: la boleta existio aunque el
+  // movimiento se haya borrado del cashflow por estar mal cargado.
+  return responder({ ok: true, mensaje: 'borrado' });
+}
+
+function filaPorId(hoja, col, id) {
+  var ultima = hoja.getLastRow();
+  if (ultima < 4) return -1;
+  var vals = hoja.getRange(4, col, ultima - 3, 1).getValues();
+  var buscado = String(id);
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][0]) === buscado) return 4 + i;
+  }
+  return -1;
+}
