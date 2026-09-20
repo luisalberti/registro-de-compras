@@ -17,19 +17,45 @@ import java.io.File
 class Almacen(ctx: Context) {
 
     private val archivo = File(ctx.filesDir, "documentos.json")
+    private val respaldo = File(ctx.filesDir, "documentos.bak")
 
-    fun cargar(): List<Documento> =
-        try {
-            if (archivo.exists()) Documento.listaDeJson(archivo.readText()) else emptyList()
-        } catch (e: Exception) {
-            // Un archivo corrupto no debe dejar la app sin arrancar. Se
-            // empieza vacio; lo peor es perder lo no exportado, no el arranque.
-            emptyList()
-        }
+    fun cargar(): List<Documento> {
+        leer(archivo)?.let { return it }
+        // Si el principal quedo a medio escribir, el respaldo es la version
+        // completa anterior. Perder el ultimo documento es molesto; perder
+        // los doscientos anteriores es perder el trabajo de un mes.
+        leer(respaldo)?.let { return it }
+        return emptyList()
+    }
 
+    private fun leer(f: File): List<Documento>? = try {
+        if (f.exists() && f.length() > 0) Documento.listaDeJson(f.readText()) else null
+    } catch (e: Exception) {
+        null
+    }
+
+    /**
+     * Graba entero o no graba.
+     *
+     * Se escribe a un archivo aparte y recien despues se reemplaza el bueno.
+     * Si el telefono se apaga en la mitad, lo que queda escrito a medias es el
+     * temporal, y el archivo que la app lee sigue siendo el anterior, completo.
+     * Escribir directo sobre el archivo bueno es como se pierde una base de
+     * datos entera por un corte de luz.
+     */
     fun guardar(lista: List<Documento>) {
         try {
-            archivo.writeText(Documento.listaAJson(lista))
+            val temporal = File(archivo.parentFile, "documentos.tmp")
+            temporal.writeText(Documento.listaAJson(lista))
+            if (archivo.exists()) {
+                respaldo.delete()
+                archivo.renameTo(respaldo)
+            }
+            if (!temporal.renameTo(archivo)) {
+                // renameTo puede fallar; entonces se copia y se borra el temporal.
+                archivo.writeText(temporal.readText())
+                temporal.delete()
+            }
         } catch (e: Exception) {
             // Mejor seguir con la lista en memoria que caerse al guardar.
         }

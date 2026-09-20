@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import cl.efficientchile.boletas.data.Documento
 import cl.efficientchile.boletas.export.Excel
 import cl.efficientchile.boletas.ui.EscanearScreen
+import cl.efficientchile.boletas.ui.GastosScreen
 import cl.efficientchile.boletas.ui.HomeScreen
 import cl.efficientchile.boletas.ui.RevisarScreen
 import cl.efficientchile.boletas.ui.TemaInventario
@@ -28,14 +29,38 @@ import java.util.Locale
 private sealed class Pantalla {
     data object Inicio : Pantalla()
     data object Escanear : Pantalla()
+    data object Gastos : Pantalla()
     data class Revisar(val lectura: LectorBoleta.Lectura) : Pantalla()
 }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        limpiarFotos()
         enableEdgeToEdge()
         setContent { TemaInventario { Surface(Modifier.fillMaxSize()) { AppRoot() } } }
+    }
+
+    /**
+     * Barre las fotos que hayan quedado dando vueltas.
+     *
+     * La foto se borra apenas se extrae el texto, asi que en condiciones
+     * normales no queda ninguna. Pero si la app se cerro justo mientras leia
+     * —bateria, una llamada, el sistema matando el proceso— el archivo quedo
+     * ahi. Fotos de boletas acumulandose sin que nadie las pidio no es un
+     * problema de espacio: es informacion de compras guardada de mas.
+     *
+     * Tambien se lleva los .xlsx exportados: ya se compartieron, ya cumplieron.
+     */
+    private fun limpiarFotos() {
+        try {
+            cacheDir.listFiles()?.forEach { f ->
+                val n = f.name
+                if (n.endsWith(".jpg") || n.endsWith(".xlsx")) f.delete()
+            }
+        } catch (e: Exception) {
+            // No poder limpiar la cache jamas debe impedir que la app abra.
+        }
     }
 }
 
@@ -58,6 +83,7 @@ private fun AppRoot() {
             docs = docs,
             exportando = exportando,
             onEscanear = { pantalla = Pantalla.Escanear },
+            onGastos = { pantalla = Pantalla.Gastos },
             onBorrar = { d -> docs.remove(d); persistir() },
             onExportar = {
                 exportando = true
@@ -76,6 +102,11 @@ private fun AppRoot() {
                     }
                 }
             },
+        )
+
+        is Pantalla.Gastos -> GastosScreen(
+            docs = docs,
+            onVolver = { pantalla = Pantalla.Inicio },
         )
 
         is Pantalla.Escanear -> EscanearScreen(

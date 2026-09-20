@@ -67,6 +67,10 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    // Explicita, aunque foundation ya la arrastra: la pantalla de gastos usa
+    // AnimatedVisibility y depender de que llegue de rebote es como se rompe
+    // un build al subir una version.
+    implementation("androidx.compose.animation:animation")
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.2")
     implementation("androidx.core:core-ktx:1.13.1")

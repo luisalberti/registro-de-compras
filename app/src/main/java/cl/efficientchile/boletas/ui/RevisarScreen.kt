@@ -37,6 +37,14 @@ fun RevisarScreen(
     var fecha by remember { mutableStateOf(lectura.fecha ?: "") }
     val tarjeta = lectura.ultimos4 ?: ""
 
+    // El detalle se puede podar. Una linea que el lector invento —un pedazo de
+    // la direccion leido como producto— tiene que poder botarse aca, porque
+    // despues se va al Excel y ensucia el analisis. No se puede editar el
+    // texto: corregir letra por letra en el telefono es mas lento que
+    // arreglarlo despues en la planilla.
+    val items = remember { mutableStateListOf<LectorBoleta.Item>().apply { addAll(lectura.items) } }
+    val sumaItems = items.sumOf { Math.round(it.valorTotal) }.toInt()
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -63,6 +71,7 @@ fun RevisarScreen(
                                     tarjeta = tarjeta,
                                     formaPago = if (tarjeta.isNotEmpty()) "tarjeta" else "",
                                     avisos = lectura.avisos.joinToString(" · "),
+                                    items = items.toList(),
                                 )
                             )
                         },
@@ -135,6 +144,56 @@ fun RevisarScreen(
             if (tarjeta.isNotEmpty()) {
                 Text("Tarjeta terminada en $tarjeta",
                     style = MaterialTheme.typography.bodySmall, color = TintaSuave)
+            }
+
+            if (items.isNotEmpty()) {
+                HorizontalDivider()
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("Qué se compró", style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f))
+                    Text("${items.size} líneas", style = MaterialTheme.typography.bodySmall,
+                        color = TintaSuave)
+                }
+
+                // La prueba de que el detalle se leyo bien: la suma de las
+                // lineas tiene que dar el neto o el total. Si no da, se dice
+                // aca, con el numero a la vista, y no en una advertencia
+                // generica que nadie puede verificar.
+                val netoNum = neto.filter { it.isDigit() }.toIntOrNull()
+                val totalNum = total.filter { it.isDigit() }.toIntOrNull()
+                val cuadra = (netoNum != null && Math.abs(sumaItems - netoNum) <= 2) ||
+                    (totalNum != null && Math.abs(sumaItems - totalNum) <= 2)
+                Surface(
+                    color = if (cuadra) CyanPalido else MaterialTheme.colorScheme.errorContainer,
+                    shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (cuadra) "Las líneas suman ${clp(sumaItems)} y calza con el documento."
+                        else "Las líneas suman ${clp(sumaItems)} y no calza con el neto ni " +
+                            "con el total. Bota la línea que sobre o corrige el monto.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (cuadra) Marino else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+
+                items.toList().forEach { it ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(it.descripcion, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "${it.cantidad} × ${clp(Math.round(it.valorUnitario).toInt())}" +
+                                    "  =  ${clp(Math.round(it.valorTotal).toInt())}",
+                                style = MaterialTheme.typography.bodySmall, color = TintaSuave)
+                        }
+                        TextButton(onClick = { items.remove(it) }) {
+                            Text("Botar", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
             }
 
             Text(

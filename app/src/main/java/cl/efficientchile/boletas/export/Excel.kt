@@ -25,6 +25,14 @@ object Excel {
     // no lo suma, y todo el punto de exportar es poder sumar.
     private val ES_NUMERO = setOf(4, 5, 6)
 
+    // La segunda hoja: una fila por producto comprado, no por documento.
+    // Repite fecha y numero de documento en cada fila a proposito, para que
+    // se pueda filtrar y hacer tabla dinamica sin tener que cruzar hojas.
+    private val COL_DETALLE = listOf(
+        "Fecha", "Tipo", "N Documento", "Descripcion",
+        "Cantidad", "Valor unitario", "Valor total",
+    )
+
     fun escribir(destino: File, docs: List<Documento>) {
         ZipOutputStream(destino.outputStream().buffered()).use { z ->
             parte(z, "[Content_Types].xml", CONTENT_TYPES)
@@ -33,6 +41,7 @@ object Excel {
             parte(z, "xl/_rels/workbook.xml.rels", WB_RELS)
             parte(z, "xl/styles.xml", STYLES)
             parte(z, "xl/worksheets/sheet1.xml", hoja(docs))
+            parte(z, "xl/worksheets/sheet2.xml", hojaDetalle(docs))
         }
     }
 
@@ -71,6 +80,24 @@ object Excel {
         return if (valor == null) "<c r=\"$ref\"/>" else "<c r=\"$ref\"><v>$valor</v></c>"
     }
 
+    /**
+     * Un valor unitario puede traer decimales (3.268,91 en una factura), asi
+     * que no se puede redondear a entero: la suma dejaria de cuadrar con el
+     * neto. Va con punto decimal porque el XML de xlsx siempre usa punto,
+     * independiente del idioma con que se abra despues.
+     */
+    private fun celdaDecimal(col: Int, fila: Int, valor: Double?): String {
+        val ref = "${letra(col)}$fila"
+        if (valor == null) return "<c r=\"$ref\"/>"
+        val redondeado = Math.round(valor * 100.0) / 100.0
+        val txt = if (redondeado == Math.floor(redondeado)) {
+            redondeado.toLong().toString()
+        } else {
+            redondeado.toString()
+        }
+        return "<c r=\"$ref\"><v>$txt</v></c>"
+    }
+
     private fun hoja(docs: List<Documento>): String {
         val filas = StringBuilder()
 
@@ -95,10 +122,37 @@ object Excel {
             filas.append("</row>")
         }
 
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n" +
-            "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" +
-            "<sheetData>$filas</sheetData></worksheet>"
+        return envolver(filas)
     }
+
+    private fun hojaDetalle(docs: List<Documento>): String {
+        val filas = StringBuilder()
+        filas.append("<row r=\"1\">")
+        COL_DETALLE.forEachIndexed { c, t -> filas.append(celdaTexto(c, 1, t, 1)) }
+        filas.append("</row>")
+
+        var fila = 1
+        docs.forEach { d ->
+            d.items.forEach { it ->
+                fila++
+                filas.append("<row r=\"$fila\">")
+                filas.append(celdaTexto(0, fila, d.fecha, 0))
+                filas.append(celdaTexto(1, fila, d.tipo, 0))
+                filas.append(celdaTexto(2, fila, d.numero, 0))
+                filas.append(celdaTexto(3, fila, it.descripcion, 0))
+                filas.append(celdaNumero(4, fila, it.cantidad))
+                filas.append(celdaDecimal(5, fila, it.valorUnitario))
+                filas.append(celdaDecimal(6, fila, it.valorTotal))
+                filas.append("</row>")
+            }
+        }
+        return envolver(filas)
+    }
+
+    private fun envolver(filas: StringBuilder): String =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n" +
+        "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" +
+        "<sheetData>$filas</sheetData></worksheet>"
 
     // --- Partes fijas del archivo, iguales para todo xlsx ------------------
 
@@ -109,6 +163,7 @@ object Excel {
         "<Default Extension=\"xml\" ContentType=\"application/xml\"/>" +
         "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>" +
         "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" +
+        "<Override PartName=\"/xl/worksheets/sheet2.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" +
         "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>" +
         "</Types>"
 
@@ -122,13 +177,15 @@ object Excel {
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n" +
         "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" " +
         "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">" +
-        "<sheets><sheet name=\"Boletas\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>"
+        "<sheets><sheet name=\"Documentos\" sheetId=\"1\" r:id=\"rId1\"/>" +
+        "<sheet name=\"Detalle\" sheetId=\"2\" r:id=\"rId2\"/></sheets></workbook>"
 
     private const val WB_RELS =
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n" +
         "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
         "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>" +
-        "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>" +
+        "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet2.xml\"/>" +
+        "<Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>" +
         "</Relationships>"
 
     private const val STYLES =

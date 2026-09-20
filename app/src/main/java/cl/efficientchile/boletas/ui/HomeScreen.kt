@@ -26,6 +26,7 @@ fun HomeScreen(
     docs: List<Documento>,
     onEscanear: () -> Unit,
     onExportar: () -> Unit,
+    onGastos: () -> Unit,
     onBorrar: (Documento) -> Unit,
     exportando: Boolean,
 ) {
@@ -37,6 +38,11 @@ fun HomeScreen(
                 title = { Text("Boletas y vouchers") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Marino, titleContentColor = Blanco),
+                actions = {
+                    if (docs.isNotEmpty()) {
+                        TextButton(onClick = onGastos) { Text("Mis gastos", color = Blanco) }
+                    }
+                },
             )
         },
         floatingActionButton = {
@@ -81,7 +87,9 @@ fun HomeScreen(
                 return@Column
             }
 
-            Surface(color = CyanPalido) {
+            // La franja del total lleva a los gastos: es el gesto natural.
+            // Quien mira el acumulado es porque quiere desarmarlo.
+            Surface(onClick = onGastos, color = CyanPalido) {
                 Row(
                     Modifier.fillMaxWidth().padding(16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -89,8 +97,8 @@ fun HomeScreen(
                 ) {
                     Column {
                         Text("${docs.size} documentos", color = TintaSuave)
-                        Text("Total acumulado", style = MaterialTheme.typography.bodySmall,
-                            color = TintaSuave)
+                        Text("Total acumulado · ver por día, semana y mes",
+                            style = MaterialTheme.typography.bodySmall, color = TintaSuave)
                     }
                     Text(clp(sumaTotal), style = MaterialTheme.typography.headlineMedium,
                         color = Marino)
@@ -139,15 +147,4 @@ private fun Fila(d: Documento, onBorrar: (Documento) -> Unit) {
             Icon(Icons.Default.Delete, "Borrar", tint = MaterialTheme.colorScheme.error)
         }
     }
-}
-
-/** 12345 -> "$12.345". Puntos de miles, sin decimales, como el peso chileno. */
-private fun clp(n: Int): String {
-    val s = n.toString()
-    val sb = StringBuilder()
-    for ((i, c) in s.withIndex()) {
-        if (i > 0 && (s.length - i) % 3 == 0) sb.append('.')
-        sb.append(c)
-    }
-    return "$$sb"
 }
