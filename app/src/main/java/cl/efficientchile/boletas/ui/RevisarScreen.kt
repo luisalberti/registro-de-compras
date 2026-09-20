@@ -28,8 +28,24 @@ fun RevisarScreen(
     lectura: LectorBoleta.Lectura,
     onGuardar: (Documento) -> Unit,
     onCancelar: () -> Unit,
+    /**
+     * true = compra tecleada a mano, sin foto.
+     *
+     * Es la misma pantalla a proposito. Una compra en efectivo sin
+     * comprobante necesita exactamente los mismos campos que una escaneada:
+     * monto, fecha y categoria. Hacer una pantalla aparte seria mantener dos
+     * versiones del mismo formulario, y tarde o temprano una se queda atras.
+     */
+    manual: Boolean = false,
 ) {
-    var tipo by remember { mutableStateOf(if (lectura.ultimos4 != null) "Voucher" else "Boleta") }
+    var tipo by remember {
+        mutableStateOf(
+            when {
+                manual -> "Efectivo"
+                lectura.ultimos4 != null -> "Voucher"
+                else -> "Boleta"
+            })
+    }
     var numero by remember { mutableStateOf(lectura.numero ?: "") }
     var rut by remember { mutableStateOf(lectura.rut ?: "") }
     var neto by remember { mutableStateOf(lectura.neto?.toString() ?: "") }
@@ -54,7 +70,7 @@ fun RevisarScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Revisa lo que se leyó") },
+                title = { Text(if (manual) "Compra en efectivo" else "Revisa lo que se leyó") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Marino, titleContentColor = Blanco),
             )
@@ -80,7 +96,11 @@ fun RevisarScreen(
                                     iva = iva.filter { it.isDigit() }.toIntOrNull(),
                                     total = total.filter { it.isDigit() }.toIntOrNull(),
                                     tarjeta = tarjeta,
-                                    formaPago = if (tarjeta.isNotEmpty()) "tarjeta" else "",
+                                    formaPago = when {
+                                        tipo == "Efectivo" -> "efectivo"
+                                        tarjeta.isNotEmpty() -> "tarjeta"
+                                        else -> ""
+                                    },
                                     avisos = lectura.avisos.joinToString(" · "),
                                     items = items.toList(),
                                     categoria = categoria.nombre,
@@ -103,7 +123,7 @@ fun RevisarScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (lectura.avisos.isNotEmpty()) {
+            if (!manual && lectura.avisos.isNotEmpty()) {
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer,
                     shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth(),
@@ -119,15 +139,15 @@ fun RevisarScreen(
             }
 
             Surface(
-                color = if (lectura.categoriaSegura) CyanPalido else Nieve,
+                color = if (!manual && lectura.categoriaSegura) CyanPalido else Nieve,
                 shape = MaterialTheme.shapes.medium,
                 border = androidx.compose.foundation.BorderStroke(
-                    2.dp, if (lectura.categoriaSegura) CyanProfundo else Borde),
+                    2.dp, if (!manual && lectura.categoriaSegura) CyanProfundo else Borde),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(Modifier.padding(14.dp)) {
                     Text(
-                        if (lectura.categoriaSegura) "Se va a guardar en"
+                        if (manual || lectura.categoriaSegura) "Se va a guardar en"
                         else "No reconocí el comercio. Se va a guardar en",
                         style = MaterialTheme.typography.bodySmall, color = TintaSuave)
                     Spacer(Modifier.height(2.dp))
@@ -143,19 +163,31 @@ fun RevisarScreen(
             }
 
             Text("¿Qué documento es?", style = MaterialTheme.typography.titleMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Boleta", "Factura", "Voucher").forEach { op ->
-                    val sel = tipo == op
-                    Surface(
-                        onClick = { tipo = op },
-                        color = if (sel) CyanPalido else Blanco,
-                        border = androidx.compose.foundation.BorderStroke(
-                            if (sel) 2.dp else 1.dp, if (sel) CyanProfundo else Borde),
-                        shape = MaterialTheme.shapes.medium, modifier = Modifier.weight(1f).height(48.dp),
-                    ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                            Text(op, color = if (sel) Marino else Tinta,
-                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal)
+            // Dos filas de dos y no una de cuatro: "Sin comprobante" no cabe
+            // legible en un cuarto de pantalla de telefono.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    listOf("Boleta", "Factura"),
+                    listOf("Voucher", "Efectivo"),
+                ).forEach { par ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        par.forEach { op ->
+                            val sel = tipo == op
+                            Surface(
+                                onClick = { tipo = op },
+                                color = if (sel) CyanPalido else Blanco,
+                                border = androidx.compose.foundation.BorderStroke(
+                                    if (sel) 2.dp else 1.dp, if (sel) CyanProfundo else Borde),
+                                shape = MaterialTheme.shapes.medium,
+                                modifier = Modifier.weight(1f).height(48.dp),
+                            ) {
+                                Box(Modifier.fillMaxSize(),
+                                    contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                    Text(op, color = if (sel) Marino else Tinta,
+                                        fontWeight = if (sel) FontWeight.SemiBold
+                                                     else FontWeight.Normal)
+                                }
+                            }
                         }
                     }
                 }
@@ -235,7 +267,8 @@ fun RevisarScreen(
             }
 
             Text(
-                "Corrige lo que haga falta. Nada se guarda hasta que aprietes Guardar.",
+                if (manual) "Escribe el monto y la fecha. Lo demás es opcional."
+                else "Corrige lo que haga falta. Nada se guarda hasta que aprietes Guardar.",
                 style = MaterialTheme.typography.bodySmall, color = TintaSuave)
             Spacer(Modifier.height(60.dp))
         }
