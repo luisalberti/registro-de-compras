@@ -55,7 +55,14 @@ fun HomeScreen(
         },
         bottomBar = {
             if (docs.isNotEmpty()) {
-                Surface(shadowElevation = 8.dp, color = Blanco) {
+                // navigationBarsPadding(): la app dibuja de borde a borde
+                // (enableEdgeToEdge), asi que sin esto el boton queda debajo
+                // de los botones de navegacion del telefono y no se puede
+                // apretar. Scaffold no se lo aplica solo a la barra inferior.
+                Surface(
+                    shadowElevation = 8.dp, color = Blanco,
+                    modifier = Modifier.navigationBarsPadding(),
+                ) {
                     Button(
                         onClick = onExportar,
                         enabled = !exportando,

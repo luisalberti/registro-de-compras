@@ -54,7 +54,12 @@ fun RevisarScreen(
             )
         },
         bottomBar = {
-            Surface(shadowElevation = 8.dp, color = Blanco) {
+            // Igual que en la pantalla de inicio: sin navigationBarsPadding el
+            // boton de guardar queda tapado por la barra del telefono.
+            Surface(
+                shadowElevation = 8.dp, color = Blanco,
+                modifier = Modifier.navigationBarsPadding(),
+            ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
